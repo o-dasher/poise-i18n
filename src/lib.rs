@@ -5,9 +5,9 @@ use std::{collections::HashMap, fmt::Display, hash::Hash, str::FromStr};
 use bevy_reflect::Reflect;
 use itertools::{iproduct, Itertools};
 use poise::{Command, CommandParameter, CommandParameterChoice};
-use rusty18n::{I18NAccess, I18NFallback, I18NTrait, I18NWrapper, R, LocaleKey};
-use strum::{Display, EnumIter, IntoEnumIterator};
 use rusty18n::I18NReflected;
+use rusty18n::{I18NAccess, I18NFallback, I18NTrait, I18NWrapper, LocaleKey, R};
+use strum::{Display, EnumIter, IntoEnumIterator};
 
 pub trait PoiseI18NMeta<K: Eq + Hash + Default + Copy, V: I18NFallback> {
     // Returns references to the required locales.
@@ -15,13 +15,13 @@ pub trait PoiseI18NMeta<K: Eq + Hash + Default + Copy, V: I18NFallback> {
 }
 
 /// Automatically implemented trait for context's that provide locales.
-pub trait RoriconTrait<K: Eq + Hash + Default + Copy, V: I18NFallback> {
+pub trait PoiseI18NTrait<K: Eq + Hash + Default + Copy, V: I18NFallback> {
     // Acquires i18n access.
     fn i18n(&self) -> I18NAccess<I18NWrapper<K, V>>;
     fn i18n_explicit(&self, localizer: &I18NWrapper<K, V>) -> I18NAccess<I18NWrapper<K, V>>;
 }
 
-impl<'a, K: Eq + Hash + Default + Copy + FromStr, V: I18NFallback, U, E> RoriconTrait<K, V>
+impl<'a, K: Eq + Hash + Default + Copy + FromStr, V: I18NFallback, U, E> PoiseI18NTrait<K, V>
     for poise::Context<'a, U, E>
 where
     Self: PoiseI18NMeta<K, V>,
@@ -43,7 +43,7 @@ enum CommandLocalization {
     Description,
 }
 
-struct LocaleAccesses<L: I18NTrait>(Vec<(String, I18NAccess<L>)>);
+struct I18NAccesses<L: I18NTrait>(Vec<(String, I18NAccess<L>)>);
 
 pub fn apply_translations<
     K: Eq + Hash + Default + Copy + Display,
@@ -61,17 +61,17 @@ pub fn apply_translations<
         .map(|key| (key.to_string(), localizer.get(*key)))
         .collect_vec();
 
-    apply_translation(commands, &LocaleAccesses(locale_accesses))
+    apply_translation(commands, &I18NAccesses(locale_accesses))
 }
 
-trait RoriconLocalizable {
+trait PoiseI18NLocalizable {
     fn name_localizations(&mut self) -> &mut HashMap<String, String>;
     fn description_localizations(&mut self) -> Option<&mut HashMap<String, String>>;
 }
 
 macro_rules! impl_localizable {
     ($struct:ident) => {
-        impl<U, E> RoriconLocalizable for $struct<U, E> {
+        impl<U, E> PoiseI18NLocalizable for $struct<U, E> {
             fn name_localizations(&mut self) -> &mut HashMap<String, String> {
                 &mut self.name_localizations
             }
@@ -86,7 +86,7 @@ macro_rules! impl_localizable {
 impl_localizable!(Command);
 impl_localizable!(CommandParameter);
 
-impl RoriconLocalizable for CommandParameterChoice {
+impl PoiseI18NLocalizable for CommandParameterChoice {
     fn name_localizations(&mut self) -> &mut HashMap<String, String> {
         &mut self.localizations
     }
@@ -99,8 +99,8 @@ impl RoriconLocalizable for CommandParameterChoice {
 fn apply_localization<L: I18NTrait>(
     path: &mut Vec<String>,
     next_tag: String,
-    localizable: &mut impl RoriconLocalizable,
-    locale_accesses: &LocaleAccesses<L>,
+    localizable: &mut impl PoiseI18NLocalizable,
+    locale_accesses: &I18NAccesses<L>,
 ) where
     L::Key: Display,
     L::Value: Reflect,
@@ -153,7 +153,7 @@ fn apply_localization<L: I18NTrait>(
 
 fn apply_translation<L: I18NTrait, U, E>(
     commands: &mut [Command<U, E>],
-    locale_accesses: &LocaleAccesses<L>,
+    locale_accesses: &I18NAccesses<L>,
 ) where
     L::Key: Display,
     L::Value: Reflect,
