@@ -1,6 +1,6 @@
 [package]
 name = "poise-i18n"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "An i18n library to be used with Poise, the Discord bot framework."
 license = "MIT"
