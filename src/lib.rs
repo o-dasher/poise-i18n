@@ -1,38 +1,44 @@
+#![feature(trait_alias)]
+
 /// This is kind of a disgusting type magic, but i think it is kind of understable
 /// given the problem that this is trying to solve.
-use std::{collections::HashMap, fmt::Display, hash::Hash, str::FromStr};
+use std::{collections::HashMap, fmt::Display, str::FromStr};
 
 use bevy_reflect::Reflect;
 use itertools::{iproduct, Itertools};
 use poise::{Command, CommandParameter, CommandParameterChoice};
-use rusty18n::I18NReflected;
-use rusty18n::{I18NAccess, I18NFallback, I18NTrait, I18NWrapper, LocaleKey, R};
+use rusty18n::{I18NAccess, I18NFallback, I18NKey, I18NReflected, I18NTrait, I18NWrapper, R};
 use strum::{Display, EnumIter, IntoEnumIterator};
 
-pub trait PoiseI18NMeta<K: Eq + Hash + Default + Copy, V: I18NFallback> {
+pub trait PoiseI18NKey = I18NKey + FromStr + ToString + Display;
+
+pub trait PoiseI18NMeta<'a, K: PoiseI18NKey, V: I18NFallback> {
     // Returns references to the required locales.
-    fn locales(&self) -> &I18NWrapper<K, V>;
+    fn locales(&self) -> &'a I18NWrapper<K, V>;
 }
 
 /// Automatically implemented trait for context's that provide locales.
-pub trait PoiseI18NTrait<K: Eq + Hash + Default + Copy, V: I18NFallback> {
+pub trait PoiseI18NTrait<'a, K: PoiseI18NKey, V: I18NFallback> {
     // Acquires i18n access.
-    fn i18n(&self) -> I18NAccess<I18NWrapper<K, V>>;
-    fn i18n_explicit(&self, localizer: &I18NWrapper<K, V>) -> I18NAccess<I18NWrapper<K, V>>;
+    fn i18n(&'a self) -> I18NAccess<I18NWrapper<K, V>>;
+    fn i18n_explicit(&'a self, wrapper: &'a I18NWrapper<K, V>)
+        -> I18NAccess<'a, I18NWrapper<K, V>>;
 }
 
-impl<'a, K: Eq + Hash + Default + Copy + FromStr, V: I18NFallback, U, E> PoiseI18NTrait<K, V>
+impl<'a, K: PoiseI18NKey + 'a, V: I18NFallback, U, E> PoiseI18NTrait<'a, K, V>
     for poise::Context<'a, U, E>
 where
-    Self: PoiseI18NMeta<K, V>,
+    Self: PoiseI18NMeta<'a, K, V>,
 {
-    fn i18n(&self) -> I18NAccess<I18NWrapper<K, V>> {
+    fn i18n(&'a self) -> I18NAccess<I18NWrapper<K, V>> {
         self.i18n_explicit(self.locales())
     }
 
-    fn i18n_explicit(&self, localizer: &I18NWrapper<K, V>) -> I18NAccess<I18NWrapper<K, V>> {
-        let key: K = LocaleKey::from(self.locale()).0;
-        localizer.get(key)
+    fn i18n_explicit(
+        &'a self,
+        wrapper: &'a I18NWrapper<K, V>,
+    ) -> I18NAccess<'a, I18NWrapper<K, V>> {
+        wrapper.get(K::from_str(self.locale().unwrap_or_default()).unwrap_or_default())
     }
 }
 
@@ -43,25 +49,21 @@ enum CommandLocalization {
     Description,
 }
 
-struct I18NAccesses<L: I18NTrait>(Vec<(String, I18NAccess<L>)>);
+struct I18NAccesses<'a, L: I18NTrait>(Vec<(String, I18NAccess<'a, L>)>);
 
-pub fn apply_translations<
-    K: Eq + Hash + Default + Copy + Display,
-    V: I18NFallback + Reflect,
-    U,
-    E,
->(
+pub fn apply_translations<K: PoiseI18NKey, V: I18NFallback + Reflect, U, E>(
     commands: &mut [Command<U, E>],
-    localizer: &I18NWrapper<K, V>,
+    wrapper: &I18NWrapper<K, V>,
 ) {
-    let locale_accesses = localizer
+    apply_translation(commands, &I18NAccesses(
+wrapper
         .store
         .0
         .keys()
-        .map(|key| (key.to_string(), localizer.get(*key)))
-        .collect_vec();
+        .map(|key| (key.to_string(), wrapper.get(*key)))
+        .collect_vec()
 
-    apply_translation(commands, &I18NAccesses(locale_accesses))
+    ))
 }
 
 trait PoiseI18NLocalizable {
@@ -100,10 +102,10 @@ fn apply_localization<L: I18NTrait>(
     path: &mut Vec<String>,
     next_tag: String,
     localizable: &mut impl PoiseI18NLocalizable,
-    locale_accesses: &I18NAccesses<L>,
+    locale_accesses: &I18NAccesses<'_, L>,
 ) where
-    L::Key: Display,
-    L::Value: Reflect,
+    L::K: Display,
+    L::V: Reflect,
 {
     path.push(next_tag);
 
@@ -124,7 +126,7 @@ fn apply_localization<L: I18NTrait>(
     let permutations = iproduct!(&locale_accesses.0, &locale_tags);
 
     for ((lang_key, access), (locale_type, tag)) in permutations {
-        let possible_resource = access.rs::<R>(tag);
+        let possible_resource = access.by_path::<R>(tag);
 
         let Some(localized_key) = possible_resource else {
             continue;
@@ -155,14 +157,14 @@ fn apply_translation<L: I18NTrait, U, E>(
     commands: &mut [Command<U, E>],
     locale_accesses: &I18NAccesses<L>,
 ) where
-    L::Key: Display,
-    L::Value: Reflect,
+    L::K: Display,
+    L::V: Reflect,
 {
     for command in commands {
         let mut path_vec = vec![];
 
         // Recursive case to apply on subcommands too.
-        apply_translation(&mut command.subcommands, &locale_accesses);
+        apply_translation(&mut command.subcommands, locale_accesses);
 
         // This could be recursive, we could have a trait that defines Children.
         // and we keep calling apply_localization to all the children of the
