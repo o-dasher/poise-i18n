@@ -1,5 +1,4 @@
-#![feature(trait_alias)]
-
+use std::hash::Hash;
 /// This is kind of a disgusting type magic, but i think it is kind of understable
 /// given the problem that this is trying to solve.
 use std::{collections::HashMap, fmt::Display, str::FromStr};
@@ -7,26 +6,39 @@ use std::{collections::HashMap, fmt::Display, str::FromStr};
 use bevy_reflect::Reflect;
 use itertools::{iproduct, Itertools};
 use poise::{Command, CommandParameter, CommandParameterChoice};
-use rusty18n::{I18NAccess, I18NFallback, I18NKey, I18NReflected, I18NTrait, I18NWrapper, R};
+use rusty18n::{I18NAccess, I18NFallback, I18NReflected, I18NTrait, I18NWrapper, R};
 use strum::{Display, EnumIter, IntoEnumIterator};
 
-pub trait PoiseI18NKey = I18NKey + FromStr + ToString + Display;
-
-pub trait PoiseI18NMeta<'a, K: PoiseI18NKey, V: I18NFallback> {
+pub trait PoiseI18NMeta<
+    'a,
+    K: Eq + Hash + Default + Copy + ToString + FromStr + Display,
+    V: I18NFallback,
+>
+{
     // Returns references to the required locales.
     fn locales(&self) -> &'a I18NWrapper<K, V>;
 }
 
-/// Automatically implemented trait for context's that provide locales.
-pub trait PoiseI18NTrait<'a, K: PoiseI18NKey, V: I18NFallback> {
+/// Automatically implemented trait for contexts that provide locales.
+pub trait PoiseI18NTrait<
+    'a,
+    K: Eq + Hash + Default + Copy + ToString + FromStr + Display,
+    V: I18NFallback,
+>
+{
     // Acquires i18n access.
     fn i18n(&'a self) -> I18NAccess<I18NWrapper<K, V>>;
     fn i18n_explicit(&'a self, wrapper: &'a I18NWrapper<K, V>)
         -> I18NAccess<'a, I18NWrapper<K, V>>;
 }
 
-impl<'a, K: PoiseI18NKey + 'a, V: I18NFallback, U, E> PoiseI18NTrait<'a, K, V>
-    for poise::Context<'a, U, E>
+impl<
+        'a,
+        K: Eq + Hash + Default + Copy + ToString + FromStr + Display + 'a,
+        V: I18NFallback,
+        U,
+        E,
+    > PoiseI18NTrait<'a, K, V> for poise::Context<'a, U, E>
 where
     Self: PoiseI18NMeta<'a, K, V>,
 {
@@ -51,19 +63,26 @@ enum CommandLocalization {
 
 struct I18NAccesses<'a, L: I18NTrait>(Vec<(String, I18NAccess<'a, L>)>);
 
-pub fn apply_translations<K: PoiseI18NKey, V: I18NFallback + Reflect, U, E>(
+pub fn apply_translations<
+    K: Eq + Hash + Default + Copy + ToString + FromStr + Display,
+    V: I18NFallback + Reflect,
+    U,
+    E,
+>(
     commands: &mut [Command<U, E>],
     wrapper: &I18NWrapper<K, V>,
 ) {
-    apply_translation(commands, &I18NAccesses(
-wrapper
-        .store
-        .0
-        .keys()
-        .map(|key| (key.to_string(), wrapper.get(*key)))
-        .collect_vec()
-
-    ))
+    apply_translation(
+        commands,
+        &I18NAccesses(
+            wrapper
+                .store
+                .0
+                .keys()
+                .map(|key| (key.to_string(), wrapper.get(*key)))
+                .collect_vec(),
+        ),
+    )
 }
 
 trait PoiseI18NLocalizable {
